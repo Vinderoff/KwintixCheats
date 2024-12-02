@@ -1,0 +1,359 @@
+// ==UserScript==
+// @name         Toggle Mute, Camera, and AutoJoin Buttons in Google Meet with Folder Menu
+// @namespace    http://tampermonkey.net/
+// @version      1.7
+// @description  Automatically clicks the mute, camera, and join buttons in Google Meet with a folder-style menu to enable/disable functions and display their status. Includes functionality to hide email and toggle dark/light theme.
+// @author       YourName
+// @match        https://meet.google.com/*
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    let autoClickEnabled = false; // Флаг для включения/выключения автоклика
+    let autoJoinEnabled = false; // Флаг для включения/выключения AutoJoin
+    let intervalID = null; // ID для интервала проверки
+    let emailHidden = false; // Флаг для скрытия/показа почты
+    let darkThemeEnabled = false; // Флаг для переключения темной/светлой темы
+    const originalEmail = "velichkomikola@balabino-nvk.com.ua"; // Оригинальный адрес почты
+
+    // Проверяем, находится ли пользователь на странице Meet
+    function isGoogleMeetPage() {
+        return window.location.href.includes("meet.google.com");
+    }
+
+    // Создаем меню
+    function createCustomMenu() {
+        // Проверяем, чтобы меню не создавалось повторно
+        if (document.getElementById('customMenu')) return;
+
+        // Добавляем контейнер для меню
+        const menu = document.createElement('div');
+        menu.id = 'customMenu';
+        menu.style.position = 'fixed';
+        menu.style.bottom = '20px';
+        menu.style.right = '20px';
+        menu.style.backgroundColor = '#ffffff';
+        menu.style.padding = '15px';
+        menu.style.borderRadius = '12px';
+        menu.style.boxShadow = '0 8px 16px rgba(0, 0, 0, 0.3)';
+        menu.style.display = 'flex';
+        menu.style.flexDirection = 'column';
+        menu.style.alignItems = 'center';
+        menu.style.zIndex = '9999';
+
+        // Кнопка для открытия/закрытия папки Auto Functions
+        const folderButton = createMenuButton(
+            'Auto menu',
+            'folder_open',
+            toggleFolder
+        );
+
+        // Статус (будет размещен рядом с кнопками)
+        const statusLabel = document.createElement('div');
+        statusLabel.id = 'autoClickStatus';
+        statusLabel.style.fontSize = '16px';
+        statusLabel.style.fontWeight = 'bold';
+        statusLabel.style.color = '#555';
+        updateStatus(statusLabel); // Изначально обновляем статус
+
+        // Статус для AutoJoin
+        const joinStatusLabel = document.createElement('div');
+        joinStatusLabel.id = 'autoJoinStatus';
+        joinStatusLabel.style.fontSize = '16px';
+        joinStatusLabel.style.fontWeight = 'bold';
+        joinStatusLabel.style.color = '#555';
+        updateJoinStatus(joinStatusLabel); // Изначально обновляем статус
+
+        // Обертка для кнопок и статусов
+        const buttonWithStatus = document.createElement('div');
+        buttonWithStatus.style.display = 'flex';
+        buttonWithStatus.style.flexDirection = 'column';
+        buttonWithStatus.style.alignItems = 'center';
+        buttonWithStatus.style.marginBottom = '10px';
+
+        buttonWithStatus.appendChild(folderButton);
+        menu.appendChild(buttonWithStatus);
+
+        // Папка с функциями AutoClick и AutoJoin
+        const folderContainer = document.createElement('div');
+        folderContainer.id = 'folderContainer';
+        folderContainer.style.display = 'none'; // Скрыта по умолчанию
+
+        // Кнопки внутри папки
+        const toggleButton = createMenuButton(
+            'Toggle AutoClick',
+            'autorenew',
+            toggleAutoClick
+        );
+        const toggleJoinButton = createMenuButton(
+            'Toggle AutoJoin',
+            'meeting_room',
+            toggleAutoJoin
+        );
+
+        // Статусы внутри папки
+        const toggleButtonStatus = document.createElement('div');
+        toggleButtonStatus.id = 'toggleAutoClickStatus';
+        toggleButtonStatus.style.fontSize = '14px';
+        toggleButtonStatus.style.color = '#555';
+        updateStatus(toggleButtonStatus);
+
+        const joinButtonStatus = document.createElement('div');
+        joinButtonStatus.id = 'toggleAutoJoinStatus';
+        joinButtonStatus.style.fontSize = '14px';
+        joinButtonStatus.style.color = '#555';
+        updateJoinStatus(joinButtonStatus);
+
+        folderContainer.appendChild(toggleButton);
+        folderContainer.appendChild(toggleButtonStatus);
+        folderContainer.appendChild(toggleJoinButton);
+        folderContainer.appendChild(joinButtonStatus);
+
+        menu.appendChild(folderContainer);
+
+        // Добавляем кнопку переключения темы
+        const themeToggleButton = createMenuButton(
+            'Toggle Theme',
+            'lightbulb_outline',
+            toggleTheme
+        );
+
+        menu.appendChild(themeToggleButton);
+
+        document.body.appendChild(menu);
+
+        // Скрыть или показать почту
+        addEmailToggle();
+    }
+
+    // Создаем кнопку для меню
+    function createMenuButton(label, icon, onClick) {
+        const button = document.createElement('div');
+        button.style.display = 'flex';
+        button.style.flexDirection = 'column';
+        button.style.alignItems = 'center';
+        button.style.justifyContent = 'center';
+        button.style.margin = '10px';
+        button.style.cursor = 'pointer';
+        button.style.transition = 'transform 0.2s ease, background-color 0.2s ease';
+
+        // Эффект наведения
+        button.onmouseenter = () => {
+            button.style.transform = 'scale(1.1)';
+            button.style.backgroundColor = '#f0f0f0';
+        };
+        button.onmouseleave = () => {
+            button.style.transform = 'scale(1)';
+            button.style.backgroundColor = 'transparent';
+        };
+
+        const labelElem = document.createElement('span');
+        labelElem.textContent = label;
+        labelElem.style.fontSize = '12px';
+        labelElem.style.color = '#555';
+
+        button.appendChild(labelElem);
+        button.onclick = onClick;
+
+        return button;
+    }
+
+    // Включение/выключение автоклика
+    function toggleAutoClick() {
+        autoClickEnabled = !autoClickEnabled;
+
+        if (autoClickEnabled) {
+            startAutoClick();
+        } else {
+            stopAutoClick();
+        }
+
+        updateStatus(document.getElementById('toggleAutoClickStatus')); // Обновляем статус
+    }
+
+    // Включение/выключение AutoJoin
+    function toggleAutoJoin() {
+        autoJoinEnabled = !autoJoinEnabled;
+
+        if (autoJoinEnabled) {
+            startAutoJoin();
+        } else {
+            stopAutoJoin();
+        }
+
+        updateJoinStatus(document.getElementById('toggleAutoJoinStatus')); // Обновляем статус
+    }
+
+    // Функция автоклика
+    function startAutoClick() {
+        if (intervalID) return; // Если интервал уже запущен, ничего не делаем
+
+        intervalID = setInterval(() => {
+            // Автоклик по кнопке микрофона (Вимкнути мікрофон)
+            const muteButton = document.querySelector(
+                'div[aria-label="Вимкнути мікрофон"]'
+            );
+            if (muteButton && muteButton.getAttribute('data-is-muted') === 'false') {
+                muteButton.click();
+                console.log('Кнопка микрофона нажата автоматически!');
+            }
+
+            // Автоклик по кнопке камеры (Вимкнути камеру)
+            const cameraButton = document.querySelector(
+                'div[aria-label="Вимкнути камеру"]'
+            );
+            if (cameraButton && cameraButton.getAttribute('data-is-muted') === 'false') {
+                cameraButton.click();
+                console.log('Кнопка камеры нажата автоматически!');
+            }
+        }, 1000); // Проверка каждую секунду
+    }
+
+    // Остановка автоклика
+    function stopAutoClick() {
+        if (intervalID) {
+            clearInterval(intervalID);
+            intervalID = null;
+        }
+    }
+
+    // Функция AutoJoin
+    function startAutoJoin() {
+        if (intervalID) return; // Если интервал уже запущен, ничего не делаем
+
+        intervalID = setInterval(() => {
+            const joinButton = document.querySelector(
+                'button.UywwFc-LgbsSe span.UywwFc-RLmnJb'
+            );
+            if (joinButton) {
+                joinButton.click();
+                console.log('Кнопка "Приєднатися зараз" нажата автоматически!');
+            }
+        }, 1000); // Проверка каждую секунду
+    }
+
+    // Остановка AutoJoin
+    function stopAutoJoin() {
+        if (intervalID) {
+            clearInterval(intervalID);
+            intervalID = null;
+        }
+    }
+
+    // Обновление статуса автоклика
+    function updateStatus(statusLabel) {
+        if (autoClickEnabled) {
+            statusLabel.textContent = 'Вкл';
+            statusLabel.style.color = 'green';
+        } else {
+            statusLabel.textContent = 'Выкл';
+            statusLabel.style.color = 'red';
+        }
+    }
+
+    // Обновление статуса AutoJoin
+    function updateJoinStatus(joinStatusLabel) {
+        if (autoJoinEnabled) {
+            joinStatusLabel.textContent = 'Вкл';
+            joinStatusLabel.style.color = 'green';
+        } else {
+            joinStatusLabel.textContent = 'Выкл';
+            joinStatusLabel.style.color = 'red';
+        }
+    }
+
+    // Функция для открытия/закрытия папки
+    function toggleFolder() {
+        const folderContainer = document.getElementById('folderContainer');
+        folderContainer.style.display =
+            folderContainer.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Функция для добавления кнопки скрытия почты
+    function addEmailToggle() {
+        const emailElement = document.querySelector('.ASy21.Duq0Bf[title="Микола Величко"]');
+        if (!emailElement) return; // Если элемент с почтой не найден, выходим
+
+        // Обновляем текст почты на "Почта"
+        const emailText = document.createElement('div');
+        emailText.classList.add('email-toggle');
+        emailText.textContent = 'Почта';
+        emailText.style.cursor = 'pointer';
+        emailText.style.fontSize = '14px';
+        emailText.style.color = '#007bff';
+        emailText.style.marginBottom = '10px';
+
+        emailText.onclick = function () {
+            if (emailHidden) {
+                emailElement.textContent = originalEmail;
+                emailHidden = false;
+                emailText.textContent = 'Почта'; // Снова показываем "Почта"
+            } else {
+                emailElement.textContent = 'Почта';
+                emailHidden = true;
+                emailText.textContent = 'Показать оригинал';
+            }
+        };
+
+        document.getElementById('customMenu').appendChild(emailText);
+    }
+
+    // Функция для переключения темы
+    function toggleTheme() {
+        darkThemeEnabled = !darkThemeEnabled;
+
+        // Удаляем текущие стили темы
+        document.documentElement.style.removeProperty('background-color');
+        document.documentElement.style.removeProperty('color');
+
+        // Переключаем тему
+        if (darkThemeEnabled) {
+            GM_addStyle(`
+                body {
+                    background-color: #333 !important;
+                    color: white !important;
+                }
+                button {
+                    background-color: #444 !important;
+                    color: white !important;
+                }
+                #customMenu {
+                    background-color: #444 !important;
+                    color: white !important;
+                }
+                #folderContainer {
+                    background-color: #444 !important;
+                    color: white !important;
+                }
+            `);
+        } else {
+            GM_addStyle(`
+                body {
+                    background-color: white !important;
+                    color: black !important;
+                }
+                button {
+                    background-color: #f1f1f1 !important;
+                    color: black !important;
+                }
+                #customMenu {
+                    background-color: white !important;
+                    color: black !important;
+                }
+                #folderContainer {
+                    background-color: white !important;
+                    color: black !important;
+                }
+            `);
+        }
+    }
+
+    // Инициализация
+    window.onload = function () {
+        if (isGoogleMeetPage()) {
+            createCustomMenu();
+        }
+    };
+})();
